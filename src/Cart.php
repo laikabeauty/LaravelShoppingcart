@@ -689,7 +689,9 @@ class Cart
         $this->createdAt = Carbon::parse(data_get($stored, 'created_at'));
         $this->updatedAt = Carbon::parse(data_get($stored, 'updated_at'));
 
-        $this->getConnection()->table($this->getTableName())->where('identifier', $identifier)->delete();
+        if(config('cart.delete_on_restore')){
+            $this->getConnection()->table($this->getTableName())->where('identifier', $identifier)->delete();
+        }
     }
 
     /**
