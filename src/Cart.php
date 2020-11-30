@@ -56,9 +56,9 @@ class Cart
     /**
      * Defines the discount percentage.
      *
-     * @var float
+     * @var Collection
      */
-    private $discount = 0;
+    private $discounts;
 
     /**
      * Defines the tax rate.
@@ -78,6 +78,7 @@ class Cart
         $this->session = $session;
         $this->events = $events;
         $this->taxRate = config('cart.tax');
+        $this->discounts = collect();
 
         $this->instance(self::DEFAULT_INSTANCE);
     }
@@ -94,11 +95,10 @@ class Cart
         $instance = $instance ?: self::DEFAULT_INSTANCE;
 
         if ($instance instanceof InstanceIdentifier) {
-            $this->discount = $instance->getInstanceGlobalDiscount();
             $instance = $instance->getInstanceIdentifier();
         }
 
-        $this->instance = 'cart.'.$instance;
+        $this->instance = 'cart.' . $instance;
 
         return $this;
     }
@@ -141,9 +141,9 @@ class Cart
     /**
      * Add an item to the cart.
      *
-     * @param \Gloudemans\Shoppingcart\CartItem $item          Item to add to the Cart
-     * @param bool                              $keepDiscount  Keep the discount rate of the Item
-     * @param bool                              $keepTax       Keep the Tax rate of the Item
+     * @param \Gloudemans\Shoppingcart\CartItem $item         Item to add to the Cart
+     * @param bool                              $keepDiscount Keep the discount rate of the Item
+     * @param bool                              $keepTax      Keep the Tax rate of the Item
      * @param bool                              $dispatchEvent
      *
      * @return \Gloudemans\Shoppingcart\CartItem The CartItem
@@ -151,7 +151,7 @@ class Cart
     public function addCartItem($item, $keepDiscount = false, $keepTax = false, $dispatchEvent = true)
     {
         if (!$keepDiscount) {
-            $item->setDiscountRate($this->discount);
+            $item->setDiscounts($this->discounts);
         }
 
         if (!$keepTax) {
@@ -404,9 +404,14 @@ class Cart
      */
     public function discountFloat()
     {
-        return $this->getContent()->reduce(function ($discount, CartItem $cartItem) {
-            return $discount + $cartItem->discountTotal;
+        $itemDiscounts = $this->getContent()->sum('discountTotal');
+
+        $cartDiscount = $this->discounts->reduce(function ($total, Discount $discount) {
+           $amount = $discount->calculateAmount($this, $total);
+           return $total + $amount;
         }, 0);
+
+        return $itemDiscounts + $cartDiscount;
     }
 
     /**
@@ -563,7 +568,7 @@ class Cart
      * Set the global tax rate for the cart.
      * This will set the tax rate for all items.
      *
-     * @param float $discount
+     * @param $taxRate
      */
     public function setGlobalTax($taxRate)
     {
@@ -571,25 +576,23 @@ class Cart
 
         $content = $this->getContent();
         if ($content && $content->count()) {
-            $content->each(function ($item, $key) {
-                $item->setTaxRate($this->taxRate);
-            });
+            $content->each->setTaxRate($this->taxRate);
         }
     }
 
     /**
      * Set the discount rate for the cart item with the given rowId.
      *
-     * @param string    $rowId
-     * @param int|float $taxRate
+     * @param string                            $rowId
+     * @param \Gloudemans\Shoppingcart\Discount $discount
      *
      * @return void
      */
-    public function setDiscount($rowId, $discount)
+    public function setItemDiscount(string $rowId, Discount $discount)
     {
         $cartItem = $this->get($rowId);
 
-        $cartItem->setDiscountRate($discount);
+        $cartItem->addDiscount($discount);
 
         $content = $this->getContent();
 
@@ -606,17 +609,30 @@ class Cart
      *
      * @return void
      */
-    public function setGlobalDiscount($discount)
+    public function addGlobalDiscount(Discount $discount)
     {
-        $this->discount = $discount;
-
-        $content = $this->getContent();
-        if ($content && $content->count()) {
-            $content->each(function ($item, $key) {
-                $item->setDiscountRate($this->discount);
-            });
-        }
+        $this->addDiscount($discount);
+        $this->getContent()->each->addDiscount($discount);
     }
+
+    public function addDiscount(Discount $discount)
+    {
+        $this->discounts->add($discount);
+        $this->discounts = $this->discounts->sortBy('priority');
+        return $this;
+    }
+
+    public function resetDiscount()
+    {
+        $this->discounts = collect();
+        $this->getContent()->each->resetDiscount();
+    }
+
+    public function discounts()
+    {
+        return $this->discounts;
+    }
+
 
     /**
      * Store an the current instance of the cart.
@@ -639,8 +655,8 @@ class Cart
 
         $this->getConnection()->table($this->getTableName())->insert([
             'identifier' => $identifier,
-            'instance'   => $this->currentInstance(),
-            'content'    => serialize($content),
+            'instance' => $this->currentInstance(),
+            'content' => serialize($content),
             'created_at' => $this->createdAt ?: Carbon::now(),
             'updated_at' => Carbon::now(),
         ]);
@@ -675,21 +691,32 @@ class Cart
         $this->instance(data_get($stored, 'instance'));
 
         $content = $this->getContent();
+        $discounts = collect();
 
         foreach ($storedContent as $cartItem) {
+            $discounts = $discounts->merge($cartItem->discounts);
+            $cartItem->resetDiscount();
             $content->put($cartItem->rowId, $cartItem);
         }
+
 
         $this->events->dispatch('cart.restored');
 
         $this->session->put($this->instance, $content);
+
+        // todo: revalidate discounts
+        $discounts->each(function ($discount) {
+            $this->addGlobalDiscount($discount);
+        });
+
+        $this->events->dispatch('cart.discounts.restored');
 
         $this->instance($currentInstance);
 
         $this->createdAt = Carbon::parse(data_get($stored, 'created_at'));
         $this->updatedAt = Carbon::parse(data_get($stored, 'updated_at'));
 
-        if(config('cart.delete_on_restore')){
+        if (config('cart.delete_on_restore')) {
             $this->getConnection()->table($this->getTableName())->where('identifier', $identifier)->delete();
         }
     }
@@ -751,7 +778,7 @@ class Cart
      *
      * @param string $attribute
      *
-     * @return float|null
+     * @return float|\Illuminate\Support\Collection|\Tightenco\Collect\Support\Collection|null
      */
     public function __get($attribute)
     {
@@ -760,6 +787,8 @@ class Cart
                 return $this->total();
             case 'tax':
                 return $this->tax();
+            case 'discounts':
+                return $this->discounts();
             case 'subtotal':
                 return $this->subtotal();
             default:
