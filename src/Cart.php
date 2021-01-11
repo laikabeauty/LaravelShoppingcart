@@ -407,8 +407,8 @@ class Cart
         $itemDiscounts = $this->getContent()->sum('discountTotal');
 
         $cartDiscount = $this->discounts->reduce(function ($total, Discount $discount) {
-           $amount = $discount->calculateAmount($this, $total);
-           return $total + $amount;
+            $amount = $discount->calculateAmount($this, $total);
+            return $total + $amount;
         }, 0);
 
         return $itemDiscounts + $cartDiscount;
@@ -611,14 +611,18 @@ class Cart
      */
     public function addGlobalDiscount(Discount $discount)
     {
-        $this->addDiscount($discount);
-        $this->getContent()->each->addDiscount($discount);
+        if (!$this->discounts->has($discount->key)) {
+            $this->addDiscount($discount);
+            $this->getContent()->each->addDiscount($discount);
+        }
     }
 
     public function addDiscount(Discount $discount)
     {
-        $this->discounts->add($discount);
-        $this->discounts = $this->discounts->sortBy('priority');
+        if (!$this->discounts->has($discount->key)) {
+            $this->discounts->add($discount);
+            $this->discounts = $this->discounts->keyBy('key')->sortBy('priority');
+        }
         return $this;
     }
 
@@ -695,6 +699,7 @@ class Cart
 
         foreach ($storedContent as $cartItem) {
             $discounts = $discounts->merge($cartItem->discounts);
+            $cartItem->updateFromBuyable($cartItem->model);
             $cartItem->resetDiscount();
             $content->put($cartItem->rowId, $cartItem);
         }
@@ -703,7 +708,6 @@ class Cart
         $this->events->dispatch('cart.restored');
 
         $this->session->put($this->instance, $content);
-
         // todo: revalidate discounts
         $discounts->each(function ($discount) {
             $this->addGlobalDiscount($discount);

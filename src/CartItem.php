@@ -95,6 +95,10 @@ class CartItem implements Arrayable, Jsonable
      * @var \Illuminate\Support\Collection
      */
     private $discounts;
+    /**
+     * @var mixed|string|null
+     */
+    private $_discountTotal;
 
     /**
      * CartItem constructor.
@@ -369,7 +373,7 @@ class CartItem implements Arrayable, Jsonable
      */
     public function setDiscounts($discounts)
     {
-        $this->discounts = collect($discounts);
+        $this->discounts = collect($discounts)->keyBy('key');
 
         return $this;
     }
@@ -383,8 +387,10 @@ class CartItem implements Arrayable, Jsonable
      */
     public function addDiscount(Discount $discount)
     {
-        $this->discounts->add($discount);
-        $this->discounts = $this->discounts->sortBy('priority');
+        if (!$this->discounts->has($discount->key)) {
+            $this->discounts->add($discount);
+            $this->discounts = $this->discounts->keyBy('key')->sortBy('priority');
+        }
         return $this;
     }
 
@@ -402,7 +408,10 @@ class CartItem implements Arrayable, Jsonable
 
     public function calculateDiscount()
     {
-        return $this->discounts->sum->calculateAmount($this);
+        if(is_null($this->_discountTotal)) {
+            $this->_discountTotal = $this->discounts->sum->calculateAmount($this);
+        }
+        return $this->_discountTotal;
     }
 
     /**

@@ -37,18 +37,22 @@ class Discount implements Arrayable, Jsonable
 
     public int $priority = 0;
 
+    public string $key;
+
 
     /**
      * CartItem constructor.
      *
-     * @param string                               $type
-     * @param float                                $amount
-     * @param string                               $name
-     * @param int                                  $priority
-     * @param array|\Illuminate\Support\Collection $options
+     * @param string $key
+     * @param string $type
+     * @param float  $amount
+     * @param string $name
+     * @param int    $priority
+     * @param array  $options
      */
-    public function __construct(string $type, float $amount, string $name, int $priority = 0, $options = [])
+    public function __construct(string $key, string $type, float $amount, string $name, int $priority = 0, $options = [])
     {
+        $this->key = $key;
         $this->type = $type;
         $this->amount = $amount;
         $this->name = $name;
@@ -86,8 +90,6 @@ class Discount implements Arrayable, Jsonable
             }
         }
 
-//        echo("{$this->type} => $amount {$item->priceTotal} " . get_class($item).PHP_EOL);
-
         return $amount;
     }
 
@@ -99,6 +101,7 @@ class Discount implements Arrayable, Jsonable
     public function toArray()
     {
         return [
+            'key' => $this->key,
             'type' => $this->type,
             'amount' => $this->amount,
             'name' => $this->name,
