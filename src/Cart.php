@@ -404,7 +404,7 @@ class Cart
      */
     public function discountFloat()
     {
-        $itemDiscounts = $this->getContent()->sum('discountTotal');
+        $itemDiscounts = $this->getContent()->sum(fn($item) => $item->discountTotal);
 
         $cartDiscount = $this->discounts->reduce(function ($total, Discount $discount) {
             $amount = $discount->calculateAmount($this, $total);
