@@ -67,6 +67,8 @@ class Cart
      */
     private $taxRate = 0;
 
+    private $meta;
+
     /**
      * Cart constructor.
      *
@@ -79,6 +81,7 @@ class Cart
         $this->events = $events;
         $this->taxRate = config('cart.tax');
         $this->discounts = collect();
+        $this->meta = collect();
 
         $this->instance(self::DEFAULT_INSTANCE);
     }
@@ -661,6 +664,7 @@ class Cart
             'identifier' => $identifier,
             'instance' => $this->currentInstance(),
             'content' => serialize($content),
+            'meta' => $this->meta->toJson(),
             'created_at' => $this->createdAt ?: Carbon::now(),
             'updated_at' => Carbon::now(),
         ]);
@@ -688,6 +692,7 @@ class Cart
         $stored = $this->getConnection()->table($this->getTableName())
             ->where('identifier', $identifier)->first();
 
+
         $storedContent = unserialize(data_get($stored, 'content'));
 
         $currentInstance = $this->currentInstance();
@@ -702,6 +707,10 @@ class Cart
             $cartItem->updateFromBuyable($cartItem->model);
             $cartItem->resetDiscount();
             $content->put($cartItem->rowId, $cartItem);
+        }
+
+        if(isset($stored->meta)) {
+            $this->meta = $this->meta->merge(json_decode($stored->meta));
         }
 
 
@@ -771,6 +780,8 @@ class Cart
         foreach ($storedContent as $cartItem) {
             $this->addCartItem($cartItem, $keepDiscount, $keepTax, $dispatchAdd);
         }
+
+        $this->meta = $this->meta->merge(json_decode($stored->meta));
 
         $this->events->dispatch('cart.merged');
 
@@ -946,5 +957,26 @@ class Cart
     public function updatedAt()
     {
         return $this->updatedAt;
+    }
+
+
+    public function getMeta(string $key = null, $default = null)
+    {
+        if($key) {
+            return $this->meta->get($key, $default);
+        }
+        return $this->meta;
+    }
+
+    public function addMeta(string $key, $value): self
+    {
+        $this->meta->put($key, $value);
+        return $this;
+    }
+
+    public function removeMeta($key): self
+    {
+        $this->meta->forget($key);
+        return $this;
     }
 }
